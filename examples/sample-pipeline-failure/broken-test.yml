@@ -1,0 +1,25 @@
+# Sample broken CI configuration for testing SentryFlow
+# This file contains intentional errors to trigger pipeline failures.
+# Copy this as .gitlab-ci.yml to test the Sentinel agent.
+
+stages:
+  - test
+  - build
+
+unit-tests:
+  stage: test
+  image: python:3.11
+  script:
+    - pip install -r requirements.txt
+    - pytest tests/ -v
+  # This will fail because there is no requirements.txt or tests/ directory
+  # Expected failure category: test_failure or config_error
+
+build-app:
+  stage: build
+  image: node:20
+  script:
+    - npm install
+    - npm run build
+  # This will fail because there is no package.json
+  # Expected failure category: config_error
