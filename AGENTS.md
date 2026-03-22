@@ -69,8 +69,8 @@ Diagnostician classifies failures into:
 - Never expose service account keys; rely on ambient credentials
 
 ## File Organization
+- `agents/` — Agent YAML definitions (system prompts, tools, visibility)
+- `flows/` — Flow YAML definitions (component wiring, routers, prompts)
 - `skills/` — SKILL.md files for reusable agent patterns
-- `.gitlab/duo/` — Agent and flow configuration
-- `agents/` — Agent system prompts for GitLab UI reference
 - `examples/` — Sample payloads for testing
 - `docs/` — Architecture and setup documentation
