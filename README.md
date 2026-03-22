@@ -1,6 +1,8 @@
 # SentryFlow
 
 **A Self-Healing DevOps Agent Flow for GitLab**
+
+> From failure to fix in seconds — not hours.
 ---
 
 ## Overview
@@ -24,37 +26,39 @@ Sentinel → Diagnostician → Surgeon → Reporter
 
 | Agent | Role | Description |
 |---|---|---|
-| **Sentinel** | Event Ingestion & Routing | Listens for GitLab pipeline failure webhooks and GCP Cloud Monitoring alerts via Pub/Sub. Normalizes both into a unified incident schema and routes to the Diagnostician. |
+| **Sentinel** | Event Ingestion & Routing | Listens for GitLab pipeline failure events and GCP Cloud Monitoring alerts via Pub/Sub. Normalizes both into a unified incident schema and routes to the Diagnostician. |
 | **Diagnostician** | Root Cause Analysis | For pipeline failures: parses job logs and identifies failure category (test, dependency, config, infra). For production incidents: correlates incident timestamp with recent deployments and commits, pulls GCP Cloud Logging context. |
-| **Surgeon** | Fix Generation & Action | Based on diagnosis, takes one of four actions: code/config fix MR, rollback MR, infra remediation + issue, or issue-only for low-confidence cases. |
+| **Surgeon** | Fix Generation & Action | Based on diagnosis, takes action: code/config fix MR, rollback MR, or issue-only for low-confidence cases. |
 | **Reporter** | Communication & Audit | Posts structured incident summary to MR/issue with root cause, affected services, fix applied, confidence level, and GCP log links. Logs event to BigQuery for historical analysis. |
 
-### Flow Orchestration
+### Flow Diagram
 
+```mermaid
+flowchart LR
+    A[Pipeline Failure] --> S[Sentinel]
+    B[GCP Alert] --> S
+    S --> D[Diagnostician]
+    D --> |Decision Gate| SU[Surgeon]
+    SU --> R[Reporter]
+    R --> MR[Fix/Rollback MR]
+    R --> I[Issue + Audit]
 ```
-Trigger → Sentinel → Diagnostician → Decision Gate → Surgeon → Reporter → End
-```
-
-The **Decision Gate** routes to one of four paths based on the Diagnostician's analysis:
-
-- **Code Fix** — Test failure, dependency issue, or config error → generate fix and open MR
-- **Rollback** — Bad production deploy → revert the suspect commit via MR
-- **Infra Action** — GKE/resource issue → create issue with remediation steps
-- **Issue Only** — Low confidence diagnosis → create structured issue for human triage
 
 ### Dual-Trigger Architecture
 
 **Trigger A — Pipeline Failure:**
 ```
-GitLab webhook → Sentinel (extracts job ID) → Diagnostician (reads job logs)
-  → categorizes failure → Surgeon (generates fix) → opens MR on new branch
+GitLab pipeline event (failed) → Sentinel (extracts job ID, reads logs)
+  → Diagnostician (categorizes failure) → Surgeon (generates fix)
+  → opens MR on new branch → Reporter posts diagnosis
 ```
 
 **Trigger B — Production Incident:**
 ```
-GCP Cloud Monitoring alert → Pub/Sub → Sentinel (normalizes alert payload)
-  → Diagnostician (correlates with recent deploys) → identifies suspect commit
-  → Surgeon (drafts rollback MR or creates remediation issue)
+GCP Cloud Monitoring alert → Pub/Sub → GitLab issue (mentions agent)
+  → Sentinel (normalizes alert payload) → Diagnostician (correlates with recent deploys)
+  → identifies suspect commit → Surgeon (drafts rollback MR)
+  → Reporter posts summary with GCP log links
 ```
 
 ---
@@ -63,34 +67,31 @@ GCP Cloud Monitoring alert → Pub/Sub → Sentinel (normalizes alert payload)
 
 | GCP Service | Priority | Role |
 |---|---|---|
-| **Cloud Monitoring** | Core | Production incident trigger. Alert policies detect error rate spikes, latency anomalies, or resource exhaustion. Alerts fire webhooks to Pub/Sub, triggering the Sentinel agent. |
+| **Cloud Monitoring** | Core | Production incident trigger. Alert policies detect error rate spikes, latency anomalies, or resource exhaustion. |
 | **Cloud Pub/Sub** | Core | Event routing layer. Bridges GCP alerts to the GitLab agent flow. |
-| **Cloud Logging** | Core | Infrastructure context for diagnosis. Correlates pipeline/production failures with infrastructure events (e.g., GKE node OOM). |
-| **BigQuery** | Enhancement | Audit trail and trend analysis. Logs every incident (trigger type, root cause, fix applied, resolution time). |
-| **Error Reporting** | Enhancement | Grouped error context — affected users, first-seen time, and stack traces for richer diagnosis. |
-| **GKE / Cloud Run** | Enhancement | Infrastructure remediation target. Surgeon can scale a GKE node pool or restart a Cloud Run service. |
+| **Cloud Logging** | Core | Infrastructure context for diagnosis. Correlates pipeline/production failures with infrastructure events. |
+| **BigQuery** | Enhancement | Audit trail and trend analysis. Logs every incident with trigger type, root cause, fix applied, and resolution time. |
 
 ---
 
 ## Platform Tools Used
 
-| Tool | Used By / Purpose |
-|---|---|
-| `get_job_logs` | Diagnostician — read failed pipeline job output |
-| `get_pipeline_errors` | Diagnostician — get logs for failed jobs from latest pipeline |
-| `get_pipeline_failing_jobs` | Diagnostician — identify which jobs failed |
-| `list_commits` | Diagnostician — find recent commits for deployment correlation |
-| `get_commit` / `get_commit_diff` | Diagnostician — analyze suspect commit changes |
-| `get_repository_file` | Diagnostician/Surgeon — read config files and source code |
-| `list_repository_tree` / `find_files` | Surgeon — understand project structure for fix generation |
-| `create_file_with_contents` / `edit_file` | Surgeon — create or modify files for the fix |
-| `create_commit` | Surgeon — commit fix/rollback to a new branch |
-| `create_merge_request` | Surgeon — open MR with fix or rollback |
-| `create_merge_request_note` | Reporter — post diagnosis summary to MR |
-| `create_issue` | Surgeon/Reporter — create incident issue for tracking |
-| `create_issue_note` | Reporter — post incident details to issue |
-| `run_command` | Diagnostician — execute shell commands for GCP API calls |
-| `blob_search` / `grep` | Diagnostician — search codebase for relevant context |
+| Tool | Used By | Purpose |
+|---|---|---|
+| `get_job_logs` | Sentinel, Diagnostician | Read failed pipeline job output |
+| `get_pipeline_errors` | Sentinel, Diagnostician | Get logs for failed jobs from latest pipeline |
+| `get_pipeline_failing_jobs` | Sentinel | Identify which jobs failed |
+| `list_commits` | Diagnostician | Find recent commits for deployment correlation |
+| `get_commit` / `get_commit_diff` | Diagnostician | Analyze suspect commit changes |
+| `get_repository_file` | Diagnostician, Surgeon | Read config files and source code |
+| `gitlab_blob_search` / `grep` | Diagnostician | Search codebase for relevant context |
+| `find_files` / `list_repository_tree` | Surgeon | Understand project structure for fix generation |
+| `create_file_with_contents` / `edit_file` | Surgeon | Create or modify files for the fix |
+| `create_commit` | Surgeon | Commit fix/rollback to a new branch |
+| `create_merge_request` | Surgeon | Open MR with fix or rollback |
+| `create_merge_request_note` | Reporter | Post diagnosis summary to MR |
+| `create_issue` / `create_issue_note` | Surgeon, Reporter | Create and annotate incident issues |
+| `run_command` | Sentinel, Diagnostician, Reporter | Execute gcloud/bq CLI for GCP integration |
 
 ---
 
@@ -98,13 +99,18 @@ GCP Cloud Monitoring alert → Pub/Sub → Sentinel (normalizes alert payload)
 
 ```
 sentryflow/
-├── README.md                           # Setup, architecture, usage
+├── README.md                           # This file
 ├── LICENSE                             # MIT License
-├── AGENTS.md                           # Agent customization rules
-├── .gitlab/
-│   └── duo/
-│       ├── agent-config.yml            # Flow execution config
-│       └── mr-review-instructions.yaml # Custom review standards
+├── AGENTS.md                           # Agent customization context
+├── agents/
+│   ├── sentinel.yml                    # Sentinel agent definition
+│   ├── diagnostician.yml               # Diagnostician agent definition
+│   ├── surgeon.yml                     # Surgeon agent definition
+│   ├── reporter.yml                    # Reporter agent definition
+│   └── agent.yml.template              # Hackathon template (reference)
+├── flows/
+│   ├── sentryflow.yml                  # SentryFlow custom flow (4-agent pipeline)
+│   └── flow.yml.template               # Flow template (reference)
 ├── skills/
 │   ├── pipeline-diagnosis/
 │   │   └── SKILL.md                    # Pipeline failure diagnosis skill
@@ -117,7 +123,18 @@ sentryflow/
 │   └── gcp-setup.md                    # GCP project setup guide
 └── examples/
     ├── sample-pipeline-failure/        # Test fixtures for pipeline failures
-    └── sample-gcp-alert/               # Sample Cloud Monitoring alert payloads
+    │   ├── broken-test.yml             # Deliberately broken CI config
+    │   ├── incident-schema.json        # Sample Sentinel output
+    │   ├── diagnosis-test-failure.json # Sample Diagnostician output
+    │   ├── diagnosis-dependency-issue.json
+    │   └── diagnosis-config-error.json
+    └── sample-gcp-alert/              # Sample Cloud Monitoring alert payloads
+        ├── alert-payload.json          # GCP alert JSON
+        ├── pubsub-message.json         # Pub/Sub message wrapper
+        └── cloud-function/             # GCP → GitLab bridge function
+            ├── main.py
+            ├── requirements.txt
+            └── deploy.sh
 ```
 
 ---
@@ -126,29 +143,24 @@ sentryflow/
 
 ### Prerequisites
 
-- A GCP project with the following APIs enabled:
-  - Cloud Monitoring
-  - Cloud Logging
-  - Cloud Pub/Sub
-  - BigQuery
+- GitLab project in the AI Hackathon group with agent platform access
+- A GCP project with Cloud Monitoring, Logging, Pub/Sub, and BigQuery APIs enabled
+
+### Quick Start
+
+1. Clone this repository
+2. Register the agents in your GitLab project (Automate > Agents)
+3. Configure GCP project (see [docs/gcp-setup.md](docs/gcp-setup.md))
+4. Push a broken commit to trigger the pipeline self-healing flow
 
 ### GCP Setup
 
-1. Enable required APIs in your GCP project:
-   ```bash
-   gcloud services enable monitoring.googleapis.com logging.googleapis.com pubsub.googleapis.com bigquery.googleapis.com
-   ```
-2. Create a Pub/Sub topic and subscription for Cloud Monitoring alerts.
-3. Configure a Cloud Monitoring alert policy to publish to the Pub/Sub topic.
-4. See [`docs/gcp-setup.md`](docs/gcp-setup.md) for detailed instructions.
-
-### GitLab Agent Setup
-
-1. Navigate to **Automate → Agents** in your GitLab project.
-2. Create four custom agents: `sentinel`, `diagnostician`, `surgeon`, `reporter`.
-3. Configure each agent with its system prompt and tool selections (see `skills/` directory).
-4. Register the custom flow using the `flow.yaml` configuration file.
-5. Configure a GitLab webhook for pipeline failure events pointing to the Sentinel agent.
+See [docs/gcp-setup.md](docs/gcp-setup.md) for detailed instructions on:
+- Enabling required APIs
+- Creating Pub/Sub topics and subscriptions
+- Configuring Cloud Monitoring alert policies
+- Setting up BigQuery audit trail
+- Service account and IAM configuration
 
 ---
 
@@ -157,7 +169,7 @@ sentryflow/
 ### Pipeline Failure (Demo)
 
 1. A commit breaks a test — the pipeline fails.
-2. GitLab fires a webhook to the Sentinel agent.
+2. Sentinel detects the failure and normalizes it into the unified incident schema.
 3. Diagnostician reads the job logs and categorizes the failure.
 4. Surgeon generates a fix and opens a merge request on a new branch.
 5. Reporter posts a structured diagnosis comment on the MR.
@@ -168,9 +180,8 @@ sentryflow/
 1. An error rate spike triggers a GCP Cloud Monitoring alert.
 2. The alert is published to Pub/Sub and received by Sentinel.
 3. Diagnostician correlates the incident timestamp with recent deployments.
-4. The suspect commit is identified using `list_commits` and `get_commit_diff`.
-5. Surgeon drafts a rollback MR or creates a remediation issue.
-6. Reporter posts the full diagnosis with GCP log links to the issue.
+4. The suspect commit is identified and a rollback MR is drafted.
+5. Reporter posts the full diagnosis with GCP log links to the issue.
 
 ---
 
@@ -178,11 +189,44 @@ sentryflow/
 
 | Metric | Before SentryFlow | After SentryFlow |
 |---|---|---|
-| Pipeline failure triage | 15–60 minutes per occurrence | Seconds |
-| Production incident MTTR | 30 minutes to several hours | Seconds |
-| Human effort required | Manual log reading + fix creation | Zero (automated) |
+| Pipeline failure triage | 15–60 minutes | Seconds |
+| Production incident MTTR | 30 min – hours | Seconds |
+| Human effort required | Manual log reading + fix | Zero (automated) |
 
 SentryFlow addresses the **"AI Paradox"** — AI tools generate code faster than ever, but the operational bottlenecks around that code remain manual. SentryFlow closes that gap.
+
+---
+
+## Edge Case Handling
+
+SentryFlow handles several real-world edge cases:
+
+| Edge Case | How It's Handled |
+|-----------|-----------------|
+| **Flaky tests** | Diagnostician checks recent pipeline history — if a test has both passed and failed recently, it flags as "likely flaky" and sets confidence to LOW (no auto-fix) |
+| **Multi-job failures** | Prioritizes by stage order (earlier = more critical). Analyzes earliest failure first as downstream failures are often cascading |
+| **Duplicate alerts** | Surgeon checks for existing `sentryflow/*` branches before creating new MRs. Reporter logs to BigQuery for deduplication analysis |
+| **Low confidence** | Creates issue for human triage instead of auto-fixing — never risks making things worse |
+| **Infrastructure issues** | Queries GCP Cloud Logging to distinguish infra problems (OOM, timeout) from application bugs |
+
+---
+
+## Demo Video
+
+<!-- TODO: Replace with actual YouTube link after recording on Day 5 -->
+**Coming March 25, 2026** — 3-minute demo showing both trigger paths:
+1. Pipeline self-healing: push broken code → fix MR appears in seconds
+2. Production incident response: GCP alert → rollback MR with full diagnosis
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | Detailed four-agent architecture, flow diagrams, and inter-agent data contracts |
+| [GCP Setup](docs/gcp-setup.md) | Step-by-step guide for configuring Cloud Monitoring, Pub/Sub, Logging, and BigQuery |
+| [BigQuery Queries](docs/bigquery-queries.md) | Sample queries for analyzing failure trends, MTTR, and auto-fix success rates |
 
 ---
 
