@@ -105,17 +105,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --role="roles/bigquery.dataEditor"
 ```
 
-## Step 6: GitLab CI/CD Variables
-
-Set these CI/CD variables in your GitLab project (Settings > CI/CD > Variables):
-
-| Variable | Value | Protected | Masked |
-|----------|-------|-----------|--------|
-| `GCP_PROJECT_ID` | Your GCP project ID | Yes | No |
-| `GCP_SERVICE_ACCOUNT_KEY` | Service account JSON key | Yes | Yes |
-| `GCP_REGION` | e.g., `us-central1` | Yes | No |
-
-## Step 7: Integration Bridge (Pub/Sub → GitLab)
+## Step 6: Integration Bridge (Pub/Sub → GitLab)
 
 To connect GCP alerts to the SentryFlow agent flow, use one of these approaches:
 
