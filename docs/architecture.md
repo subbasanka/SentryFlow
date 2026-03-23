@@ -28,7 +28,7 @@ flowchart LR
 ### 2. Diagnostician — Root Cause Analysis
 - **Input:** Unified incident schema from Sentinel
 - **Output:** Diagnosis JSON with failure category, confidence, and suspect commits
-- **Tools:** `get_job_logs`, `get_pipeline_errors`, `list_commits`, `get_commit`, `get_commit_diff`, `get_repository_file`, `blob_search`, `grep`, `run_command`
+- **Tools:** `get_job_logs`, `get_pipeline_errors`, `list_commits`, `get_commit`, `get_commit_diff`, `get_repository_file`, `gitlab_blob_search`, `grep`, `run_command`
 - **Responsibility:** Classify failures into categories (test_failure, dependency_issue, config_error, infra_timeout, permission_error). For production incidents, correlate with recent commits and GCP Cloud Logging data.
 
 ### 3. Surgeon — Fix Generation & Action
@@ -124,7 +124,7 @@ After Diagnostician produces a diagnosis, the Surgeon routes based on:
 | get_commit | | x | | |
 | get_commit_diff | | x | | |
 | get_repository_file | | x | x | |
-| blob_search | | x | | |
+| gitlab_blob_search | | x | | |
 | grep | | x | | |
 | create_file_with_contents | | | x | |
 | edit_file | | | x | |
